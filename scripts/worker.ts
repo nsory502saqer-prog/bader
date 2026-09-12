@@ -16,7 +16,10 @@ import { drainOutbox } from '../src/server/notifications/outbox.js';
 const QUEUE_NAME = 'bader-jobs';
 const POLL_INTERVAL_MS = 30_000;
 
-function redisConnection(): ConnectionOptions | null {
+/** عنوان Redis المفكوك — نوع صريح لأن `ConnectionOptions` اتحاد يشمل عميلًا جاهزًا. */
+type RedisTarget = { host: string; port: number; password?: string };
+
+function parseRedisUrl(): RedisTarget | null {
   const url = process.env['REDIS_URL'];
   if (!url) return null;
 
@@ -29,6 +32,50 @@ function redisConnection(): ConnectionOptions | null {
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * يتحقق أن Redis يستجيب فعلًا، لا أن العنوان مكتوب فقط.
+ *
+ * الحالة الأرجح في الواقع ليست غياب `REDIS_URL` بل وجوده مع خادم متوقف:
+ * إعداد منسوخ من بيئة أخرى، أو خدمة لم تُشغَّل بعد إعادة تمهيد. بلا هذا
+ * الفحص ينهار العامل ولا تُرسل رسالة واحدة، مع أن البديل — حلقة زمنية على
+ * نفس الجدول — يعمل تمامًا.
+ */
+async function redisReachable(connection: RedisTarget): Promise<boolean> {
+  const { default: Redis } = await import('ioredis');
+
+  const client = new Redis({
+    ...connection,
+    // فشل سريع: لا معنى لانتظار طويل في فحص توفّر.
+    connectTimeout: 2000,
+    maxRetriesPerRequest: 0,
+    retryStrategy: () => null,
+    lazyConnect: true,
+    enableOfflineQueue: false,
+  });
+
+  // ioredis يطبع «Unhandled error event» ما لم يُلتقط الخطأ بمستمع.
+  // الفشل هنا نتيجة متوقعة للفحص لا عطل، فتُبتلع ويُكتفى برسالة مفهومة.
+  client.on('error', () => {});
+
+  try {
+    await client.connect();
+    await client.ping();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    client.disconnect();
+  }
+}
+
+/** حلقة زمنية على صندوق الإشعارات — البديل حين لا يتوفر Redis. */
+async function runPollingLoop(): Promise<never> {
+  for (;;) {
+    await runJobs().catch((error) => console.error('فشل تنفيذ المهام:', error));
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 }
 
@@ -56,18 +103,23 @@ async function cleanupExpired(): Promise<void> {
 }
 
 async function main() {
-  const connection = redisConnection();
+  const connection = parseRedisUrl();
 
   if (!connection) {
     console.info(
-      'لا يوجد REDIS_URL صالح — يعمل العامل بحلقة زمنية كل 30 ثانية.\n' +
+      'لا يوجد REDIS_URL — يعمل العامل بحلقة زمنية كل 30 ثانية.\n' +
         'الرسائل لا تضيع: مصدر الحقيقة جدول notifications لا الطابور.',
     );
+    return runPollingLoop();
+  }
 
-    while (true) {
-      await runJobs().catch((error) => console.error('فشل تنفيذ المهام:', error));
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    }
+  if (!(await redisReachable(connection))) {
+    console.warn(
+      `REDIS_URL مضبوط لكن لا استجابة من ${connection.host}:${connection.port}.\n` +
+        'يعمل العامل بحلقة زمنية كل 30 ثانية بدل الطابور. الرسائل لا تضيع،\n' +
+        'والفرق تأخير قد يبلغ نصف دقيقة. شغّل Redis أو احذف REDIS_URL للتخلّص من هذا التحذير.',
+    );
+    return runPollingLoop();
   }
 
   console.info('العامل متصل بـRedis. الطابور:', QUEUE_NAME);
