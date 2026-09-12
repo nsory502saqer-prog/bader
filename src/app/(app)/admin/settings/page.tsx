@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Box, BoxHeader, BoxTitle, PageHeader } from '@/components/ui/surface';
 import { SettingsForm } from '@/components/admin/settings-form';
+import { LogoUploader } from '@/components/admin/logo-uploader';
+import { hasLogo } from '@/components/ui/org-logo';
 import { requirePermission } from '@/lib/session';
 import { db } from '@/lib/db';
 import { DEFAULT_SLA_DAYS } from '@/lib/workflow';
@@ -36,6 +38,7 @@ export default async function SettingsPage() {
       : (DEFAULT_SLA_DAYS as Record<string, number>);
 
   const stages = Object.keys(DEFAULT_SLA_DAYS) as RequestStatus[];
+  const logoPresent = await hasLogo();
 
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-2">
@@ -49,6 +52,14 @@ export default async function SettingsPage() {
         sla={sla}
         stages={stages}
       />
+
+      <Box>
+        <BoxHeader>
+          <BoxTitle>شعار الجمعية</BoxTitle>
+          <span className="text-xs text-fg-muted">الصورة الزخرفية الوحيدة في النظام</span>
+        </BoxHeader>
+        <LogoUploader hasLogo={logoPresent} />
+      </Box>
 
       {/*
         إعدادات البيئة تُعرض ولا تُعدَّل من الواجهة: تغييرها يعني إعادة نشر،

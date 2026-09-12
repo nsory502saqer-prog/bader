@@ -1,0 +1,37 @@
+# ما لا يدخل صورة Docker.
+#
+# الاستبعاد هنا ليس للحجم وحده: نسخ `.env` إلى صورة يعني تسريب الأسرار لكل
+# من يسحب الصورة، ونسخ `backups/` يعني تسريب قاعدة البيانات كاملة.
+
+node_modules
+.next
+out
+dist
+
+# الأسرار — تُمرَّر بيئةً وقت التشغيل لا تُخبز في الصورة.
+.env
+.env.*
+!.env.example
+
+# بيانات حساسة
+backups
+storage
+reports
+
+# أدوات التطوير والاختبار
+.git
+.github
+test-results
+playwright-report
+.playwright
+e2e
+tests
+*.log
+coverage
+
+# ملفات المحرّر والنظام
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+desktop.ini

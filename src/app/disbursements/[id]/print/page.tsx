@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import QRCode from 'qrcode';
+import { OrgLogo } from '@/components/ui/org-logo';
 import { getCurrentUser } from '@/lib/session';
 import { can } from '@/lib/rbac';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -57,9 +58,14 @@ export default async function DisbursementPrintPage({
 
       <main className="sheet">
         <header className="head">
-          <div>
-            <h1 className="org">{org.name}</h1>
-            <p className="region">{org.region}</p>
+          <div className="brand">
+            {/* الشعار هو الصورة الزخرفية الوحيدة في الوثيقة، ويغيب بصمت
+                إن لم يُرفع فتبقى الترويسة نصية سليمة. */}
+            <OrgLogo size={56} />
+            <div>
+              <h1 className="org">{org.name}</h1>
+              <p className="region">{org.region}</p>
+            </div>
           </div>
 
           <div className="qr" aria-label="رمز التحقق" dangerouslySetInnerHTML={{ __html: qrSvg }} />
@@ -180,6 +186,7 @@ export default async function DisbursementPrintPage({
           border-bottom: 1px solid #d1d9e0;
           padding-bottom: 16px;
         }
+        .brand { display: flex; align-items: center; gap: 16px; }
         .org { font-size: 20px; font-weight: 600; margin: 0; }
         .region { font-size: 12px; color: #59636e; margin: 4px 0 0; }
         .qr { width: 96px; height: 96px; flex: none; }

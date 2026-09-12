@@ -1,0 +1,104 @@
+# تشغيل النظام كاملًا: التطبيق + قاعدة البيانات + Redis + العامل.
+#
+#   cp .env.example .env   ثم عبّئ الأسرار
+#   docker compose up -d
+#   docker compose exec app npx prisma migrate deploy
+#   docker compose exec app npx tsx prisma/seed.ts
+#
+# ⚠ هذا الملف يفترض استضافة **داخل المملكة**: النظام يحمل هويات وطنية
+#   وبيانات صحية ويخضع لنظام حماية البيانات الشخصية.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?مطلوب}
+      POSTGRES_DB: ${POSTGRES_DB:-bader_aid}
+      # ترتيب محايد: الفرز العربي يُدار في التطبيق لا في القاعدة.
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # لا منفذ منشور: القاعدة تُرى من شبكة compose وحدها.
+    expose:
+      - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-bader} -d ${POSTGRES_DB:-bader_aid}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # الحفظ على القرص مطفأ: الطابور ليس مصدر الحقيقة، فالإشعارات تعيش في
+    # جدول notifications ولا تضيع بفقد Redis.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    expose:
+      - '6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bader}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-bader_aid}?schema=public
+      REDIS_URL: redis://redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:?مطلوب}
+      AUTH_URL: ${AUTH_URL:?مطلوب}
+      AUTH_TRUST_HOST: 'true'
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?مطلوب}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_PATH: /app/storage
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-me-south-1}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      NOTIFICATIONS_DRIVER: ${NOTIFICATIONS_DRIVER:-log}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_ID: ${WHATSAPP_PHONE_ID:-}
+      SMS_ENDPOINT: ${SMS_ENDPOINT:-}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      SMS_SENDER: ${SMS_SENDER:-BADER}
+    volumes:
+      - storage:/app/storage
+    ports:
+      - '${APP_PORT:-3000}:3000'
+
+  # عامل الإشعارات والتنظيف — عملية منفصلة فلا يبطّئ الإرسال استجابة الموظف.
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bader}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-bader_aid}?schema=public
+      REDIS_URL: redis://redis:6379
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?مطلوب}
+      NOTIFICATIONS_DRIVER: ${NOTIFICATIONS_DRIVER:-log}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_ID: ${WHATSAPP_PHONE_ID:-}
+      SMS_ENDPOINT: ${SMS_ENDPOINT:-}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      SMS_SENDER: ${SMS_SENDER:-BADER}
+    volumes:
+      - storage:/app/storage
+    command: ['npx', 'tsx', 'scripts/worker.ts']
+
+volumes:
+  db-data:
+  storage:

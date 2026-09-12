@@ -6,8 +6,21 @@ import { defineConfig, devices } from '@playwright/test';
  * تعمل على بناء الإنتاج لا على خادم التطوير، فما يُختبر هو ما سيُسلَّم فعلًا.
  * الواجهة عربية RTL، لذا اللغة والمنطقة مضبوطتان هنا.
  */
+/**
+ * مخرجات الاختبار خارج مجلد المشروع على ويندوز.
+ *
+ * Playwright يحذف مجلد المخرجات ويعيد إنشاءه في بداية كل تشغيل، فيضيع معه
+ * استثناء Dropbox الذي يضعه `scripts/prepare-build-dir.mjs`. النتيجة أخطاء
+ * `EBUSY` عشوائية حين يقفل Dropbox ملف أثر أو لقطة أثناء المزامنة.
+ */
+function outputDir(): string {
+  if (process.env['PLAYWRIGHT_OUTPUT_DIR']) return process.env['PLAYWRIGHT_OUTPUT_DIR'];
+  return process.platform === 'win32' ? 'C:\\bader-test-results' : './test-results';
+}
+
 export default defineConfig({
   testDir: './e2e',
+  outputDir: outputDir(),
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

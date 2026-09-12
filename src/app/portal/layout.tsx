@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { OrgLogo } from '@/components/ui/org-logo';
 import { getPortalUser } from '@/server/portal/session';
 import { portalLogout } from '@/server/actions/portal-actions';
 
@@ -15,7 +16,8 @@ export default async function PortalLayout({ children }: { children: React.React
     <div className="min-h-screen bg-canvas-subtle">
       <header className="border-b border-border bg-canvas">
         <div className="mx-auto flex h-[48px] max-w-[820px] items-center justify-between gap-1 px-2">
-          <Link href="/portal" className="text-sm font-semibold text-fg">
+          <Link href="/portal" className="flex items-center gap-1 text-sm font-semibold text-fg">
+            <OrgLogo size={28} />
             بوابة المستفيدين
           </Link>
 
