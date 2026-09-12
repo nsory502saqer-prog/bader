@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+build/
+next-env.d.ts
+
+# production
+dist/
+
+# env
+.env
+.env*.local
+!.env.example
+
+# testing
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# uploads (local dev storage)
+/storage/
+/tmp/
+
+# migration reports
+/reports/*.csv
+/reports/*.json
+
+# typescript
+*.tsbuildinfo

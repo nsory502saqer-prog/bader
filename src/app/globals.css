@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  الواجهة عربية أصيلة الاتجاه: dir="rtl" على <html> منذ أول بايت.
+  لا يوجد في هذا الملف أي قلب CSS لاحق (transform: scaleX(-1) أو ما شابه)،
+  والمكوّنات تستعمل الخصائص المنطقية (inline-start / inline-end) لا left/right.
+*/
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  [data-color-mode='dark'] {
+    color-scheme: dark;
+  }
+
+  html {
+    /* لا تكبير تلقائي للخط على iOS عند الدوران */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bgColor-default);
+    color: var(--fgColor-default);
+    font-size: 14px;
+    /* العربية تحتاج مساحة رأسية أكبر من اللاتينية بسبب التشكيل والنقاط */
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* الأرقام والمعرّفات تُقرأ وتُقارن: خط أحادي واتجاه LTR داخل سياق RTL */
+  .tnum {
+    font-family: theme('fontFamily.mono');
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  /* حلقة تركيز واحدة لكل النظام — شرط وصول، لا زينة */
+  :focus-visible {
+    outline: 2px solid var(--borderColor-accent-emphasis);
+    outline-offset: -1px;
+    border-radius: 6px;
+  }
+
+  ::placeholder {
+    color: var(--fgColor-muted);
+  }
+
+  /* الفقرات النصية لا تتجاوز 70 حرفًا */
+  .prose-limit {
+    max-width: 70ch;
+  }
+
+  /* احترام تفضيل تقليل الحركة */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* شريط تمرير هادئ يشبه شريط GitHub، لا يسرق الانتباه من الجدول */
+  .scroll-subtle::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-subtle::-webkit-scrollbar-thumb {
+    background-color: var(--borderColor-default);
+    border-radius: 6px;
+  }
+  .scroll-subtle::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+}

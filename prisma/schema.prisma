@@ -1,0 +1,689 @@
+// نظام إدارة طلبات الإعانات الطبية — جمعية بادر
+// مخطط قاعدة البيانات (PostgreSQL + Prisma)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgTrgm(map: "pg_trgm"), unaccent]
+}
+
+// ───────────────────────────── التعدادات ─────────────────────────────
+
+enum Role {
+  admin
+  reception
+  screener
+  warehouse
+  purchasing
+  finance
+  viewer
+}
+
+enum Gender {
+  male
+  female
+}
+
+/// حالات الطلب — آلة الحالات الصارمة معرَّفة في src/lib/workflow.ts
+enum RequestStatus {
+  draft
+  submitted
+  screening
+  rejected
+  approved
+  warehouse
+  purchasing
+  ready_to_issue
+  order_issued
+  delivered
+  on_hold
+  cancelled
+}
+
+enum Priority {
+  normal
+  urgent
+}
+
+enum RequestSource {
+  walk_in
+  phone
+  portal
+}
+
+enum RequestItemStatus {
+  pending
+  in_stock
+  to_purchase
+  issued
+  cancelled
+}
+
+enum DocType {
+  medical_report
+  id_copy
+  device_photo
+  quotation
+  other
+}
+
+enum StockMovementType {
+  in
+  out
+  adjust
+}
+
+enum DisbursementStatus {
+  issued
+  delivered
+  cancelled
+}
+
+enum PurchaseOrderStatus {
+  draft
+  ordered
+  partially_received
+  received
+  cancelled
+}
+
+enum NotificationChannel {
+  whatsapp
+  sms
+}
+
+enum NotificationStatus {
+  queued
+  sending
+  sent
+  failed
+  /// لا جوال للمستفيد أو القناة معطّلة — لا يُعاد المحاولة
+  skipped
+}
+
+// ───────────────────────────── المستخدمون والمصادقة ─────────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @db.VarChar(255)
+  email         String    @unique @db.VarChar(255)
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?   @db.VarChar(255)
+  role          Role      @default(viewer)
+  isActive      Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  accounts Account[]
+  sessions Session[]
+
+  createdRequests  Request[]              @relation("RequestCreatedBy")
+  assignedRequests Request[]              @relation("RequestAssignedTo")
+  statusChanges    StatusHistory[]
+  uploads          Attachment[]
+  issuedOrders     DisbursementOrder[]    @relation("OrderIssuedBy")
+  stockMovements   StockMovement[]
+  auditEntries     AuditLog[]
+  beneficiaryViews BeneficiaryAccessLog[]
+  savedViews       SavedView[]
+  quotationsAdded  Quotation[]            @relation("QuotationCreatedBy")
+  purchaseOrders   PurchaseOrder[]        @relation("PurchaseOrderCreatedBy")
+
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ───────────────────────────── القوائم المرجعية ─────────────────────────────
+
+model City {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique @db.VarChar(120)
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+
+  districts     District[]
+  beneficiaries Beneficiary[]
+
+  @@map("cities")
+}
+
+model District {
+  id        Int       @id @default(autoincrement())
+  cityId    Int       @map("city_id")
+  name      String    @db.VarChar(120)
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+
+  city          City          @relation(fields: [cityId], references: [id])
+  beneficiaries Beneficiary[]
+
+  @@unique([cityId, name])
+  @@index([cityId])
+  @@map("districts")
+}
+
+model IncomeSource {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique @db.VarChar(120)
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+
+  beneficiaries Beneficiary[]
+
+  @@map("income_sources")
+}
+
+model Program {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique @db.VarChar(40)
+  name        String    @unique @db.VarChar(120)
+  description String?   @db.Text
+  sortOrder   Int       @default(0) @map("sort_order")
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+
+  items Item[]
+
+  @@map("programs")
+}
+
+model Item {
+  id           Int       @id @default(autoincrement())
+  programId    Int       @map("program_id")
+  name         String    @db.VarChar(200)
+  unit         String    @default("حبة") @db.VarChar(40)
+  hasSizes     Boolean   @default(false) @map("has_sizes")
+  isConsumable Boolean   @default(false) @map("is_consumable")
+  defaultCost  Decimal?  @map("default_cost") @db.Decimal(12, 2)
+  reorderLevel Int       @default(0) @map("reorder_level")
+  isActive     Boolean   @default(true) @map("is_active")
+  deletedAt    DateTime? @map("deleted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  program        Program         @relation(fields: [programId], references: [id])
+  requestItems   RequestItem[]
+  inventory      Inventory[]
+  stockMovements StockMovement[]
+  quotations     Quotation[]
+  purchaseItems  PurchaseOrderItem[]
+
+  @@unique([programId, name])
+  @@index([programId])
+  @@index([isActive])
+  @@map("items")
+}
+
+// ───────────────────────────── المستفيدون ─────────────────────────────
+
+model Beneficiary {
+  id             String    @id @default(uuid()) @db.Uuid
+  nationalId     String    @unique @map("national_id") @db.VarChar(10)
+  fullName       String    @map("full_name") @db.VarChar(255)
+  /// مُولَّد عند الحفظ — للبحث التقريبي فقط، لا يُعرض للمستخدم
+  nameNormalized String    @map("name_normalized") @db.VarChar(255)
+  gender         Gender
+  birthDate      DateTime? @map("birth_date") @db.Date
+  phone          String?   @db.VarChar(20)
+  incomeSourceId Int?      @map("income_source_id")
+  cityId         Int?      @map("city_id")
+  districtId     Int?      @map("district_id")
+  addressNote    String?   @map("address_note") @db.Text
+  notes          String?   @db.Text
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  incomeSource IncomeSource?          @relation(fields: [incomeSourceId], references: [id])
+  city         City?                  @relation(fields: [cityId], references: [id])
+  district     District?              @relation(fields: [districtId], references: [id])
+  requests       Request[]
+  accessLogs     BeneficiaryAccessLog[]
+  notifications  Notification[]
+  portalSessions PortalSession[]
+
+  /// فهرس trigram: يجعل البحث التقريبي عن «عائشة» يعثر على «عايشه» بسرعة
+  @@index([nameNormalized(ops: raw("gin_trgm_ops"))], map: "beneficiaries_name_trgm_idx", type: Gin)
+  @@index([nameNormalized])
+  @@index([phone])
+  @@index([cityId])
+  @@index([deletedAt])
+  @@map("beneficiaries")
+}
+
+/// تسجيل كل عملية اطلاع على ملف مستفيد — متطلب نظام حماية البيانات الشخصية
+model BeneficiaryAccessLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  beneficiaryId String   @map("beneficiary_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  ip            String?  @db.VarChar(64)
+  viewedAt      DateTime @default(now()) @map("viewed_at")
+
+  beneficiary Beneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@index([beneficiaryId, viewedAt])
+  @@index([userId, viewedAt])
+  @@map("beneficiary_access_log")
+}
+
+// ───────────────────────────── الطلبات ─────────────────────────────
+
+model Request {
+  id            String        @id @default(uuid()) @db.Uuid
+  requestNo     String        @unique @map("request_no") @db.VarChar(20)
+  beneficiaryId String        @map("beneficiary_id") @db.Uuid
+  status        RequestStatus @default(draft)
+  priority      Priority      @default(normal)
+  submittedAt   DateTime?     @map("submitted_at")
+  closedAt      DateTime?     @map("closed_at")
+  createdById   String        @map("created_by") @db.Uuid
+  assignedToId  String?       @map("assigned_to") @db.Uuid
+  source        RequestSource @default(walk_in)
+  notes         String?       @db.Text
+  /// مرجع الصف الأصلي في ملف Excel المرحَّل
+  legacyRowRef  String?       @map("legacy_row_ref") @db.VarChar(50)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  beneficiary   Beneficiary         @relation(fields: [beneficiaryId], references: [id])
+  createdBy     User                @relation("RequestCreatedBy", fields: [createdById], references: [id])
+  assignedTo    User?               @relation("RequestAssignedTo", fields: [assignedToId], references: [id])
+  items         RequestItem[]
+  statusHistory StatusHistory[]
+  attachments   Attachment[]
+  orders        DisbursementOrder[]
+  notifications Notification[]
+
+  @@index([status])
+  @@index([submittedAt])
+  @@index([beneficiaryId])
+  @@index([assignedToId, status])
+  @@index([deletedAt])
+  @@map("requests")
+}
+
+/// جوهر التصميم: كل صنف مطلوب صف مستقل، لا نص داخل خلية
+model RequestItem {
+  id           String            @id @default(uuid()) @db.Uuid
+  requestId    String            @map("request_id") @db.Uuid
+  itemId       Int?              @map("item_id")
+  size         String?           @db.VarChar(20)
+  quantity     Int               @default(1)
+  itemStatus   RequestItemStatus @default(pending) @map("item_status")
+  fulfilledQty Int               @default(0) @map("fulfilled_qty")
+  /// النص الأصلي قبل الترحيل — يُحفظ دائمًا حتى لو نجحت المطابقة
+  legacyText   String?           @map("legacy_text") @db.Text
+  note         String?           @db.Text
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  item    Item?   @relation(fields: [itemId], references: [id])
+
+  @@index([requestId])
+  @@index([itemId])
+  @@index([itemStatus])
+  @@map("request_items")
+}
+
+/// سجل سير العمل — يُكتب تلقائيًا ولا يُعدَّل ولا يُحذف إطلاقًا
+model StatusHistory {
+  id         String         @id @default(uuid()) @db.Uuid
+  requestId  String         @map("request_id") @db.Uuid
+  fromStatus RequestStatus? @map("from_status")
+  toStatus   RequestStatus  @map("to_status")
+  userId     String         @map("user_id") @db.Uuid
+  changedAt  DateTime       @default(now()) @map("changed_at")
+  note       String?        @db.Text
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([requestId, changedAt])
+  @@map("status_history")
+}
+
+model Attachment {
+  id           String  @id @default(uuid()) @db.Uuid
+  requestId    String  @map("request_id") @db.Uuid
+  filePath     String  @map("file_path") @db.VarChar(500)
+  originalName String  @map("original_name") @db.VarChar(255)
+  mimeType     String  @map("mime_type") @db.VarChar(120)
+  size         Int
+  docType      DocType @default(other) @map("doc_type")
+  uploadedById String  @map("uploaded_by") @db.Uuid
+
+  uploadedAt DateTime  @default(now()) @map("uploaded_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  request    Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+
+  @@index([requestId])
+  @@map("attachments")
+}
+
+// ───────────────────────────── المخزون والصرف ─────────────────────────────
+
+model Inventory {
+  id               String   @id @default(uuid()) @db.Uuid
+  itemId           Int      @map("item_id")
+  size             String?  @db.VarChar(20)
+  quantityOnHand   Int      @default(0) @map("quantity_on_hand")
+  quantityReserved Int      @default(0) @map("quantity_reserved")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  item Item @relation(fields: [itemId], references: [id])
+
+  @@unique([itemId, size])
+  @@index([itemId])
+  @@map("inventory")
+}
+
+model StockMovement {
+  id            String            @id @default(uuid()) @db.Uuid
+  itemId        Int               @map("item_id")
+  size          String?           @db.VarChar(20)
+  type          StockMovementType
+  quantity      Int
+  referenceType String?           @map("reference_type") @db.VarChar(60)
+  referenceId   String?           @map("reference_id") @db.VarChar(60)
+  userId        String            @map("user_id") @db.Uuid
+  note          String?           @db.Text
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  item Item @relation(fields: [itemId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([itemId, createdAt])
+  @@map("stock_movements")
+}
+
+model DisbursementOrder {
+  id             String             @id @default(uuid()) @db.Uuid
+  orderNo        String             @unique @map("order_no") @db.VarChar(30)
+  requestId      String             @map("request_id") @db.Uuid
+  issuedAt       DateTime           @default(now()) @map("issued_at")
+  issuedById     String             @map("issued_by") @db.Uuid
+  deliveredAt    DateTime?          @map("delivered_at")
+  receivedByName String?            @map("received_by_name") @db.VarChar(255)
+  signaturePath  String?            @map("signature_path") @db.VarChar(500)
+  status         DisbursementStatus @default(issued)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  request  Request @relation(fields: [requestId], references: [id])
+  issuedBy User    @relation("OrderIssuedBy", fields: [issuedById], references: [id])
+
+  @@index([requestId])
+  @@index([status])
+  @@map("disbursement_orders")
+}
+
+// ───────────────────────────── المشتريات ─────────────────────────────
+
+model Supplier {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique @db.VarChar(200)
+  phone     String?   @db.VarChar(20)
+  email     String?   @db.VarChar(255)
+  notes     String?   @db.Text
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  purchaseOrders PurchaseOrder[]
+  quotations     Quotation[]
+
+  @@map("suppliers")
+}
+
+/// عرض سعر من مورّد لصنف — أساس المفاضلة قبل إصدار أمر الشراء
+model Quotation {
+  id         Int       @id @default(autoincrement())
+  supplierId Int       @map("supplier_id")
+  itemId     Int       @map("item_id")
+  size       String?   @db.VarChar(20)
+  unitPrice  Decimal   @map("unit_price") @db.Decimal(12, 2)
+  validUntil DateTime? @map("valid_until") @db.Date
+  notes      String?   @db.Text
+
+  createdById String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  supplier  Supplier @relation(fields: [supplierId], references: [id])
+  item      Item     @relation(fields: [itemId], references: [id])
+  createdBy User     @relation("QuotationCreatedBy", fields: [createdById], references: [id])
+
+  @@index([itemId, size])
+  @@index([supplierId])
+  @@map("quotations")
+}
+
+model PurchaseOrder {
+  id         String              @id @default(uuid()) @db.Uuid
+  poNo       String              @unique @map("po_no") @db.VarChar(30)
+  supplierId Int?                @map("supplier_id")
+  status     PurchaseOrderStatus @default(draft)
+  notes      String?             @db.Text
+
+  createdById String    @map("created_by") @db.Uuid
+  orderedAt   DateTime? @map("ordered_at")
+  receivedAt  DateTime? @map("received_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  supplier  Supplier?           @relation(fields: [supplierId], references: [id])
+  createdBy User                @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(uuid()) @db.Uuid
+  purchaseOrderId String  @map("purchase_order_id") @db.Uuid
+  itemId          Int     @map("item_id")
+  size            String? @db.VarChar(20)
+  quantity        Int
+  receivedQty     Int     @default(0) @map("received_qty")
+  unitCost        Decimal? @map("unit_cost") @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
+  @@map("purchase_order_items")
+}
+
+// ───────────────────────────── الإشعارات ─────────────────────────────
+
+/**
+ * صندوق الإشعارات الصادرة (Outbox).
+ *
+ * الرسالة تُكتب هنا أولًا داخل نفس معاملة تغيير الحالة، ثم يلتقطها العامل
+ * ويرسلها. هكذا لا تضيع رسالة لأن Redis كان متوقفًا، ولا تُرسل رسالة عن
+ * تغيير حالة تراجَع عنه — والسجل يبقى دليلًا على ما أُرسل ومتى ولمن.
+ */
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  channel   NotificationChannel
+  status    NotificationStatus  @default(queued)
+  /// الجوال بصيغة 05XXXXXXXX كما خُزِّن وقت الإنشاء
+  toPhone   String?             @map("to_phone") @db.VarChar(20)
+  body      String              @db.Text
+  /// مفتاح القالب المستعمل — للتحليل لا للعرض
+  template  String              @db.VarChar(60)
+
+  requestId     String?   @map("request_id") @db.Uuid
+  beneficiaryId String?   @map("beneficiary_id") @db.Uuid
+
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error") @db.Text
+  sentAt      DateTime? @map("sent_at")
+  /// معرّف الرسالة عند المزوّد، للمطابقة عند التحقيق في شكوى
+  providerRef String?   @map("provider_ref") @db.VarChar(120)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  request     Request?     @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  beneficiary Beneficiary? @relation(fields: [beneficiaryId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([requestId])
+  @@map("notifications")
+}
+
+// ───────────────────────────── بوابة المستفيد ─────────────────────────────
+
+/**
+ * رمز تحقق لمرة واحدة لدخول بوابة المستفيد.
+ *
+ * الرمز **مجزَّأ** لا مخزَّن نصًا: تسريب الجدول لا يعطي أحدًا رموزًا صالحة.
+ * العدّاد `attempts` يقفل الرمز بعد خمس محاولات فاشلة فلا يُخمَّن.
+ */
+model OtpCode {
+  id        String   @id @default(uuid()) @db.Uuid
+  phone     String   @db.VarChar(20)
+  codeHash  String   @map("code_hash") @db.VarChar(255)
+  expiresAt DateTime @map("expires_at")
+  attempts  Int      @default(0)
+  consumedAt DateTime? @map("consumed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phone, createdAt])
+  @@map("otp_codes")
+}
+
+/**
+ * جلسة بوابة المستفيد — منفصلة تمامًا عن جلسات الموظفين.
+ * الكوكي معرّف مبهم يقابل هذا الصف، وحذف الصف يقطع الوصول فورًا.
+ */
+model PortalSession {
+  id            String   @id @default(uuid()) @db.Uuid
+  sessionToken  String   @unique @map("session_token")
+  beneficiaryId String   @map("beneficiary_id") @db.Uuid
+  expires       DateTime
+  ip            String?  @db.VarChar(64)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  beneficiary Beneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+
+  @@index([beneficiaryId])
+  @@map("portal_sessions")
+}
+
+// ───────────────────────────── التدقيق والإعدادات ─────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(60)
+  modelType String   @map("model_type") @db.VarChar(60)
+  modelId   String   @map("model_id") @db.VarChar(60)
+  oldValues Json?    @map("old_values")
+  newValues Json?    @map("new_values")
+  ip        String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([modelType, modelId, createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_log")
+}
+
+/// العروض المخصصة: فلاتر محفوظة لقائمة الطلبات
+model SavedView {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String   @db.VarChar(120)
+  filters   Json
+  isShared  Boolean  @default(false) @map("is_shared")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_views")
+}
+
+/// الإعدادات العامة (اسم الجمعية، الشعار، مدد SLA) — مفتاح/قيمة
+model Setting {
+  key       String   @id @db.VarChar(80)
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
