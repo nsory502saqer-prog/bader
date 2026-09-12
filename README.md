@@ -82,6 +82,7 @@ npm run worker
 | `npm run backup` | نسخة احتياطية **مع اختبار استرجاع فعلي** |
 | `npm run lint` | فحص ESLint |
 | `npm run encrypt:backfill` | تشفير الحقول الحساسة في السجلات القائمة |
+| `npm run db:transfer` | نقل قاعدة البيانات لخادم آخر مع التحقق من الأعداد |
 
 ## ترحيل بيانات Excel
 

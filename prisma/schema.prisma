@@ -7,8 +7,17 @@ generator client {
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
+  provider = "postgresql"
+
+  /// اتصال التطبيق — يمرّ بمجمّع الاتصالات عند استضافة مثل Supabase.
+  url = env("DATABASE_URL")
+
+  /// اتصال مباشر للترحيلات.
+  ///
+  /// الترحيل يحتاج جلسة كاملة (أقفال، DDL، معاملات طويلة) وهو ما لا يضمنه
+  /// مجمّع في وضع المعاملة. محليًا يساوي `DATABASE_URL` نفسه.
+  directUrl = env("DIRECT_URL")
+
   extensions = [pgTrgm(map: "pg_trgm"), unaccent]
 }
 
