@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -26,7 +26,8 @@
     "prebuild": "node scripts/prepare-build-dir.mjs",
     "pretest:e2e": "node scripts/prepare-build-dir.mjs",
     "migrate:excel": "tsx scripts/migrate-excel/index.ts",
-    "worker": "tsx scripts/worker.ts"
+    "worker": "tsx scripts/worker.ts",
+    "backup": "tsx --env-file=.env scripts/backup.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -56,6 +57,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
     "@playwright/test": "^1.63.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.20.2",

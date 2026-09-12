@@ -9,7 +9,8 @@ import { requirePermission } from '@/lib/session';
 import { can } from '@/lib/rbac';
 import { maskNationalId } from '@/lib/arabic';
 import { formatDate } from '@/lib/format';
-import { getLookups, searchBeneficiaries } from '@/server/beneficiaries';
+import { searchBeneficiaries } from '@/server/beneficiaries';
+import { db, notDeleted } from '@/lib/db';
 import { BeneficiarySearch } from '@/components/beneficiaries/beneficiary-search';
 
 export const metadata: Metadata = { title: 'المستفيدون' };
@@ -34,14 +35,20 @@ export default async function BeneficiariesPage({
   const genderRaw = one(params['gender']);
   const page = Number.parseInt(one(params['page']) || '1', 10) || 1;
 
-  const [{ rows, total, pageSize }, lookups] = await Promise.all([
+  const [{ rows, total, pageSize }, cities] = await Promise.all([
     searchBeneficiaries({
       q,
       cityId: cityIdRaw ? Number(cityIdRaw) : null,
       gender: genderRaw === 'male' || genderRaw === 'female' ? genderRaw : null,
       page,
     }),
-    getLookups(),
+    // المدن وحدها: فلتر هذه الشاشة لا يحتاج الأحياء، وجلبها كان يحمّل
+    // مئات الصفوف في كل زيارة بلا فائدة.
+    db.city.findMany({
+      where: { ...notDeleted, isActive: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
   ]);
 
   // الهوية رقم وطني حسّاس: تُخفى جزئيًا لمن لا يملك صلاحية رؤيتها كاملة.
@@ -75,7 +82,7 @@ export default async function BeneficiariesPage({
         </BoxHeader>
 
         <div className="border-b border-border p-2">
-          <BeneficiarySearch cities={lookups.cities} />
+          <BeneficiarySearch cities={cities} />
         </div>
 
         {rows.length === 0 ? (

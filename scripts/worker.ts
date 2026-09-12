@@ -64,7 +64,6 @@ async function main() {
         'الرسائل لا تضيع: مصدر الحقيقة جدول notifications لا الطابور.',
     );
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       await runJobs().catch((error) => console.error('فشل تنفيذ المهام:', error));
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
