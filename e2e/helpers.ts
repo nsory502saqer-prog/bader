@@ -7,6 +7,7 @@ export const ACCOUNTS = {
   reception: 'reception@bader.org.sa',
   screener: 'screener@bader.org.sa',
   warehouse: 'warehouse@bader.org.sa',
+  purchasing: 'purchasing@bader.org.sa',
   finance: 'finance@bader.org.sa',
   viewer: 'viewer@bader.org.sa',
 } as const;

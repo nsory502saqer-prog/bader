@@ -218,10 +218,12 @@ export async function listSuppliers() {
 export type SupplierRow = Awaited<ReturnType<typeof listSuppliers>>[number];
 
 export async function listQuotations() {
-  return db.quotation.findMany({
+  const rows = await db.quotation.findMany({
     where: notDeleted,
-    orderBy: { createdAt: 'desc' },
-    take: 200,
+    // عند تساوي السعر يفوز الأحدث: عرض اليوم بنفس سعر عرض العام الماضي هو
+    // الأوثق، لأن القديم قد يكون تجاوزه المورّد وإن لم يُسجَّل له تاريخ انتهاء.
+    orderBy: [{ itemId: 'asc' }, { unitPrice: 'asc' }, { createdAt: 'desc' }],
+    take: 500,
     select: {
       id: true,
       size: true,
@@ -232,6 +234,33 @@ export async function listQuotations() {
       supplier: { select: { id: true, name: true } },
       item: { select: { id: true, name: true, unit: true } },
     },
+  });
+
+  const now = new Date();
+  const cheapestSeen = new Set<string>();
+
+  // `Decimal` من Prisma لا يعبر حدّ الخادم إلى العميل، فيُحوَّل إلى رقم هنا.
+  return rows.map((row) => {
+    const key = `${row.item.id}|${row.size ?? ''}`;
+    const expired = row.validUntil !== null && row.validUntil < now;
+
+    // الأرخص لكل صنف/مقاس: الصفوف مرتّبة بالسعر تصاعديًا، فأول غير منتهٍ
+    // هو الأرخص الصالح. العرض المنتهي لا يُوصى به مهما كان سعره.
+    const isCheapest = !expired && !cheapestSeen.has(key);
+    if (isCheapest) cheapestSeen.add(key);
+
+    return {
+      id: row.id,
+      size: row.size,
+      unitPrice: Number(row.unitPrice),
+      validUntil: row.validUntil,
+      notes: row.notes,
+      createdAt: row.createdAt,
+      supplier: row.supplier,
+      item: row.item,
+      expired,
+      isCheapest,
+    };
   });
 }
 

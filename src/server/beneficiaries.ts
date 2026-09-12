@@ -157,6 +157,35 @@ export async function getBeneficiaryProfile(id: string) {
   });
 }
 
+/**
+ * كل مرفقات المستفيد عبر طلباته.
+ *
+ * المواصفة تطلب المرفقات في ملف المستفيد لا في الطلب وحده: الباحث الاجتماعي
+ * يريد أن يرى التقرير الطبي الذي رُفع قبل ستة أشهر وهو ينظر في طلب اليوم،
+ * لا أن يفتح كل طلب سابق يبحث عنه.
+ */
+export async function getBeneficiaryAttachments(beneficiaryId: string) {
+  return db.attachment.findMany({
+    where: { ...notDeleted, request: { beneficiaryId, ...notDeleted } },
+    orderBy: { uploadedAt: 'desc' },
+    select: {
+      id: true,
+      originalName: true,
+      thumbPath: true,
+      docType: true,
+      size: true,
+      mimeType: true,
+      uploadedAt: true,
+      uploadedBy: { select: { name: true } },
+      request: { select: { id: true, requestNo: true } },
+    },
+  });
+}
+
+export type BeneficiaryAttachment = Awaited<
+  ReturnType<typeof getBeneficiaryAttachments>
+>[number];
+
 /** القوائم المرجعية التي تحتاجها نماذج المستفيدين. */
 export async function getLookups() {
   const [cities, districts, incomeSources] = await Promise.all([

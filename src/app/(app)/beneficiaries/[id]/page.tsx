@@ -12,7 +12,8 @@ import { maskNationalId } from '@/lib/arabic';
 import { formatDate, formatDays } from '@/lib/format';
 import { STATUS_LABELS, STATUS_TONES } from '@/lib/workflow';
 import { recordBeneficiaryAccess } from '@/lib/audit';
-import { getBeneficiaryProfile } from '@/server/beneficiaries';
+import { getBeneficiaryAttachments, getBeneficiaryProfile } from '@/server/beneficiaries';
+import { BeneficiaryAttachments } from '@/components/beneficiaries/attachments-list';
 
 export const metadata: Metadata = { title: 'ملف المستفيد' };
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,11 @@ export default async function BeneficiaryProfilePage({
 
   const beneficiary = await getBeneficiaryProfile(id);
   if (!beneficiary) notFound();
+
+  // المرفقات مجمَّعة عبر كل طلبات المستفيد — لمن يملك صلاحية قراءتها فقط.
+  const attachments = can(user.role, 'attachment:read')
+    ? await getBeneficiaryAttachments(beneficiary.id)
+    : [];
 
   // متطلب حماية البيانات: كل اطّلاع على ملف مستفيد يُسجَّل بصاحبه ووقته.
   await recordBeneficiaryAccess({ beneficiaryId: beneficiary.id, userId: user.id });
@@ -229,6 +235,19 @@ export default async function BeneficiaryProfilePage({
               </TableContainer>
             )}
           </Box>
+
+          {can(user.role, 'attachment:read') ? (
+            <Box>
+              <BoxHeader>
+                <BoxTitle>
+                  المرفقات{' '}
+                  <span className="tnum font-normal text-fg-muted">({attachments.length})</span>
+                </BoxTitle>
+                <span className="text-xs text-fg-muted">من كل طلبات المستفيد</span>
+              </BoxHeader>
+              <BeneficiaryAttachments attachments={attachments} />
+            </Box>
+          ) : null}
         </div>
       </div>
     </div>

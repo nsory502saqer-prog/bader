@@ -27,7 +27,8 @@
     "pretest:e2e": "node scripts/prepare-build-dir.mjs",
     "migrate:excel": "tsx scripts/migrate-excel/index.ts",
     "worker": "tsx scripts/worker.ts",
-    "backup": "tsx --env-file=.env scripts/backup.ts"
+    "backup": "tsx --env-file=.env scripts/backup.ts",
+    "encrypt:backfill": "tsx --env-file=.env scripts/encrypt-backfill.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
