@@ -1,4 +1,4 @@
-import { Queue, Worker, type ConnectionOptions } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { drainOutbox } from '../src/server/notifications/outbox.js';
 
 /**
@@ -16,7 +16,7 @@ import { drainOutbox } from '../src/server/notifications/outbox.js';
 const QUEUE_NAME = 'bader-jobs';
 const POLL_INTERVAL_MS = 30_000;
 
-/** عنوان Redis المفكوك — نوع صريح لأن `ConnectionOptions` اتحاد يشمل عميلًا جاهزًا. */
+/** عنوان Redis المفكوك — BullMQ يقبله بنيويًا، والنوع الصريح يمنع تسرّب `any`. */
 type RedisTarget = { host: string; port: number; password?: string };
 
 function parseRedisUrl(): RedisTarget | null {
