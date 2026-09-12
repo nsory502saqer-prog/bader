@@ -1,13 +1,17 @@
 import type { Metadata } from 'next';
-import { PageHeader } from '@/components/ui/surface';
+import { Box, BoxHeader, BoxTitle, PageHeader } from '@/components/ui/surface';
 import { SettingsForm } from '@/components/admin/settings-form';
 import { requirePermission } from '@/lib/session';
 import { db } from '@/lib/db';
 import { DEFAULT_SLA_DAYS } from '@/lib/workflow';
+import { storageDescription } from '@/lib/storage';
+import { defaultChannel, notificationsEnabled } from '@/server/notifications/drivers';
 import type { RequestStatus } from '@prisma/client';
 
 export const metadata: Metadata = { title: 'الإعدادات العامة' };
 export const dynamic = 'force-dynamic';
+
+const CHANNEL_LABELS = { whatsapp: 'واتساب', sms: 'رسائل SMS' } as const;
 
 export default async function SettingsPage() {
   await requirePermission('admin:settings');
@@ -45,6 +49,50 @@ export default async function SettingsPage() {
         sla={sla}
         stages={stages}
       />
+
+      {/*
+        إعدادات البيئة تُعرض ولا تُعدَّل من الواجهة: تغييرها يعني إعادة نشر،
+        والمفاتيح لا يصحّ أن تمرّ عبر متصفح. المقصود أن يرى المدير ما يعمل
+        فعلًا بدل أن يخمّنه.
+      */}
+      <Box>
+        <BoxHeader>
+          <BoxTitle>إعدادات البيئة</BoxTitle>
+          <span className="text-xs text-fg-muted">للاطّلاع — تُضبط في ملف .env</span>
+        </BoxHeader>
+        <dl className="grid gap-2 p-2 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-fg-muted">تخزين المرفقات</dt>
+            <dd className="text-sm text-fg">{storageDescription()}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-fg-muted">قناة الإشعارات</dt>
+            <dd className="text-sm text-fg">
+              {notificationsEnabled()
+                ? `${CHANNEL_LABELS[defaultChannel()]} · مزوّد ${process.env['NOTIFICATIONS_DRIVER'] ?? 'log'}`
+                : 'معطّلة'}
+            </dd>
+          </div>
+        </dl>
+
+        {(process.env['NOTIFICATIONS_DRIVER'] ?? 'log') === 'log' ? (
+          <div className="border-t border-border px-2 py-1">
+            <p className="prose-limit text-xs text-fg-attention">
+              مزوّد الإشعارات الحالي «log» يسجّل الرسائل ولا يرسلها. هذا مناسب للتجربة، وعند
+              التشغيل الحقيقي اضبط NOTIFICATIONS_DRIVER على whatsapp أو sms.
+            </p>
+          </div>
+        ) : null}
+
+        {(process.env['STORAGE_DRIVER'] ?? 'local') === 'local' ? (
+          <div className="border-t border-border px-2 py-1">
+            <p className="prose-limit text-xs text-fg-attention">
+              المرفقات تُخزَّن على قرص الخادم. للإنتاج استعمل تخزينًا متوافقًا مع S3 مستضافًا
+              داخل المملكة، فالمرفقات تحوي تقارير طبية وصور هوية.
+            </p>
+          </div>
+        ) : null}
+      </Box>
     </div>
   );
 }
