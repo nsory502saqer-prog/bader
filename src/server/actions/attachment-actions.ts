@@ -37,6 +37,7 @@ export async function uploadAttachment(formData: FormData): Promise<ActionResult
       data: {
         requestId,
         filePath: stored.filePath,
+        thumbPath: stored.thumbPath,
         originalName: stored.originalName,
         mimeType: stored.mimeType,
         size: stored.size,

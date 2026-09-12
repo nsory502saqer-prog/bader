@@ -85,10 +85,29 @@ test.describe('التجهيز والصرف', () => {
     await orderLink.click();
     await page.waitForURL(/\/disbursements\/[0-9a-f-]{36}$/, { timeout: 30_000 });
 
-    // ── 5. التسليم يغلق الطلب ──
+    // ── 5. التسليم بتوقيع المستلم يغلق الطلب ──
     await page.getByLabel('اسم المستلم').fill('سعاد ناصر سعد الحربي');
+
+    // التوقيع يُرسم على القماش بأحداث المؤشّر، كما يفعل الإصبع على الجوال.
+    const pad = page.getByLabel('مساحة التوقيع');
+    const box = await pad.boundingBox();
+    await page.mouse.move(box!.x + 30, box!.y + 70);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 90, box!.y + 40);
+    await page.mouse.move(box!.x + 150, box!.y + 90);
+    await page.mouse.up();
+    await expect(page.getByText('التوقيع مُلتقَط.')).toBeVisible();
+
     await page.getByRole('button', { name: 'تأكيد التسليم وإغلاق الطلب' }).click();
     await expect(page.getByText('تم التسليم').first()).toBeVisible();
+
+    // التوقيع محفوظ ويُعرض في تفاصيل الأمر.
+    const signature = page.getByRole('img', { name: /توقيع/ });
+    await expect(signature).toBeVisible();
+    const src = await signature.getAttribute('src');
+    const signatureResponse = await page.request.get(src!);
+    expect(signatureResponse.status()).toBe(200);
+    expect(signatureResponse.headers()['content-type']).toContain('image/png');
 
     await page.goto(requestUrl);
     await expect(page.getByText('من صدر أمر الصرف إلى تم التسليم')).toBeVisible();

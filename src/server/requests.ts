@@ -193,6 +193,7 @@ export async function getRequestDetail(id: string) {
         select: {
           id: true,
           originalName: true,
+          thumbPath: true,
           docType: true,
           size: true,
           mimeType: true,

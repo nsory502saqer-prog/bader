@@ -9,13 +9,28 @@ import { ACCOUNTS, login, uniqueNationalId } from './helpers';
  *   - التنزيل يمرّ بمسار محمي يتحقق من الجلسة، لا من مجلد عام.
  */
 
-/** أصغر PNG صالح: توقيع سليم ورأس IHDR. */
-const REAL_PNG = Buffer.from(
-  '89504e470d0a1a0a0000000d4948445200000001000000010806000000' +
-    '1f15c4890000000a49444154789c6300010000050001' +
-    '0d0a2db40000000049454e44ae426082',
-  'hex',
-);
+/**
+ * صورة PNG تشبه ما يصوّره الموظف بجواله: كبيرة، وذات بنية فوتوغرافية.
+ *
+ * ضجيج مموَّه لا نمط هندسي. النمط الهندسي يضغطه PNG ضغطًا مثاليًا بينما
+ * يضخّمه WebP الفاقد — فيتركه النظام كما هو (سلوك صحيح لكنه لا يثبت أن
+ * الضغط يعمل). الضجيج المموَّه ينتج ~4.8MB بـPNG و~58KB بـWebP، وهو ما
+ * يقيسه هذا الاختبار.
+ */
+async function photoLikePng(): Promise<Buffer> {
+  const { randomBytes } = await import('node:crypto');
+  const sharp = (await import('sharp')).default;
+  const side = 2400;
+
+  return sharp(randomBytes(side * side * 3), {
+    raw: { width: side, height: side, channels: 3 },
+  })
+    // التمويه 8 يُبقي الملف عند ~4.8MB: أكبر بكثير من الناتج المضغوط
+    // وأصغر بأمان من حد الرفع 10MB.
+    .blur(8)
+    .png()
+    .toBuffer();
+}
 
 /** ملف تنفيذي على ويندوز (يبدأ بـMZ) متنكّر باسم وامتداد PDF. */
 const DISGUISED_EXE = Buffer.from('4d5a90000300000004000000ffff0000', 'hex');
@@ -48,14 +63,16 @@ async function createRequest(page: import('@playwright/test').Page): Promise<str
 }
 
 test.describe('المرفقات', () => {
-  test('رفع صورة صالحة ثم تنزيلها من المسار المحمي', async ({ page }) => {
+  test('رفع صورة صالحة: تُضغط وتُولَّد لها مصغّرة وتُفتح بالحجم الكامل', async ({ page }) => {
     await createRequest(page);
+
+    const original = await photoLikePng();
 
     await page.getByLabel('نوع المستند').selectOption('medical_report');
     await page.locator('input[type="file"]').setInputFiles({
       name: 'تقرير-طبي.png',
       mimeType: 'image/png',
-      buffer: REAL_PNG,
+      buffer: original,
     });
 
     const link = page.getByRole('link', { name: /تقرير-طبي\.png/ });
@@ -66,11 +83,33 @@ test.describe('المرفقات', () => {
     const row = page.getByRole('listitem').filter({ hasText: 'تقرير-طبي.png' });
     await expect(row.getByText('تقرير طبي')).toBeVisible();
 
-    // التنزيل يعمل لصاحب الصلاحية.
+    // المصغّرة مربّعة 64×64 كما تحدّده المواصفة.
+    const thumb = row.locator('img').first();
+    await expect(thumb).toBeVisible();
+    const box = await thumb.boundingBox();
+    expect(Math.round(box!.width)).toBe(64);
+    expect(Math.round(box!.height)).toBe(64);
+
+    // الصورة ضُغطت إلى WebP وصغُر حجمها كثيرًا عن الأصل.
     const href = await link.getAttribute('href');
     const response = await page.request.get(href!);
     expect(response.status()).toBe(200);
-    expect(response.headers()['content-type']).toContain('image/png');
+    expect(response.headers()['content-type']).toContain('image/webp');
+
+    const storedSize = (await response.body()).length;
+    expect(storedSize).toBeLessThan(original.length);
+
+    // المصغّرة تُخدَم من نفس المسار المحمي بمعامل thumb، وهي أصغر بكثير.
+    const thumbResponse = await page.request.get(`${href}?thumb=1`);
+    expect(thumbResponse.status()).toBe(200);
+    expect((await thumbResponse.body()).length).toBeLessThan(storedSize);
+
+    // النقر على المصغّرة يفتح العارض، وEscape يغلقه.
+    await row.getByRole('button', { name: /عرض .* بالحجم الكامل/ }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
   });
 
   test('يرفض ملفًا تنفيذيًا متنكّرًا في هيئة PDF', async ({ page }) => {
@@ -93,7 +132,7 @@ test.describe('المرفقات', () => {
     await page.locator('input[type="file"]').setInputFiles({
       name: 'صورة.png',
       mimeType: 'image/png',
-      buffer: REAL_PNG,
+      buffer: await photoLikePng(),
     });
 
     const href = await page.getByRole('link', { name: /صورة\.png/ }).getAttribute('href');

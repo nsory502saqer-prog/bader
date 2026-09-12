@@ -45,7 +45,17 @@ export type StoredFile = {
   size: number;
   mimeType: string;
   originalName: string;
+  /** مسار المصغّرة — للصور فقط */
+  thumbPath: string | null;
 };
+
+/** أبعاد المصغّرة كما تحدّدها مواصفة الواجهة: مربّع 64×64 بقصّ مركزي. */
+export const THUMB_SIZE = 64;
+
+/** أقصى بُعد للصورة المخزَّنة بعد الضغط. */
+const MAX_IMAGE_DIMENSION = 2000;
+
+const COMPRESSIBLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type Driver = 'local' | 's3';
 
@@ -130,45 +140,122 @@ async function streamToBuffer(body: unknown): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+// ───────────────────────────── معالجة الصور ─────────────────────────────
+
+/**
+ * ضغط الصورة قبل التخزين.
+ *
+ * موظف الاستقبال يصوّر التقرير بجوال حديث، فيصل ملف بـ12 ميجابكسل لصورة
+ * ورقة A4. تخزينه كما هو يضاعف تكلفة التخزين ويبطّئ فتح الملف على اتصال
+ * ضعيف بلا أي مكسب: القراءة لا تحتاج أكثر من 2000 بكسل.
+ *
+ * WebP لأنها أصغر من JPEG بجودة مكافئة، و`rotate()` بلا وسيط يطبّق دوران
+ * EXIF — بدونه تظهر صور الجوال مقلوبة.
+ */
+async function compressImage(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (!COMPRESSIBLE.has(mimeType)) return null;
+
+  try {
+    const sharp = (await import('sharp')).default;
+    const output = await sharp(buffer)
+      .rotate()
+      .resize({
+        width: MAX_IMAGE_DIMENSION,
+        height: MAX_IMAGE_DIMENSION,
+        fit: 'inside',
+        // لا تكبير: صورة صغيرة أصلًا تبقى كما هي.
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 82 })
+      .toBuffer();
+
+    // لا فائدة من استبدال الأصل بنسخة أكبر.
+    return output.length < buffer.length ? { buffer: output, mimeType: 'image/webp' } : null;
+  } catch {
+    // فشل المعالجة لا يمنع الرفع: الأصل يُخزَّن كما هو.
+    return null;
+  }
+}
+
+/** مصغّرة مربّعة بقصّ مركزي — تُعرض في قائمة المرفقات. */
+async function makeThumbnail(buffer: Buffer, mimeType: string): Promise<Buffer | null> {
+  if (!COMPRESSIBLE.has(mimeType)) return null;
+
+  try {
+    const sharp = (await import('sharp')).default;
+    return await sharp(buffer)
+      .rotate()
+      .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover', position: 'centre' })
+      .webp({ quality: 75 })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
 // ───────────────────────────── الواجهة ─────────────────────────────
 
-export async function storeFile(file: File, prefix: string): Promise<StoredFile> {
-  const buffer = Buffer.from(await file.arrayBuffer());
-
-  if (!verifyMagicBytes(buffer, file.type)) {
-    throw new Error('محتوى الملف لا يطابق نوعه المعلن. قد يكون تالفًا أو مزوَّرًا.');
-  }
-
-  // اسم عشوائي: اسم الملف الأصلي قد يحمل اسم مريض أو رقم هوية، فلا يصير
-  // جزءًا من مسار قد يظهر في سجل أو رابط.
-  const extension = path.extname(file.name).slice(0, 10).replace(/[^.\w]/g, '');
-  const key = `${prefix}/${randomUUID()}${extension}`;
-
+/** يكتب بايتات إلى المزوّد الحالي تحت المفتاح المعطى. */
+async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   if (driver() === 's3') {
     const { client, bucket } = s3();
     await client.send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
-        Body: buffer,
-        ContentType: file.type,
+        Body: body,
+        ContentType: contentType,
         // تشفير في حالة السكون على مستوى الكائن.
         ServerSideEncryption: 'AES256',
         // الحاوية خاصة: لا قراءة عامة مهما كانت سياسة الحاوية.
         ACL: 'private',
       }),
     );
-  } else {
-    const destination = resolveWithinRoot(key);
-    await mkdir(path.dirname(destination), { recursive: true });
-    await writeFile(destination, buffer);
+    return;
+  }
+
+  const destination = resolveWithinRoot(key);
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, body);
+}
+
+export async function storeFile(file: File, prefix: string): Promise<StoredFile> {
+  const original = Buffer.from(await file.arrayBuffer());
+
+  if (!verifyMagicBytes(original, file.type)) {
+    throw new Error('محتوى الملف لا يطابق نوعه المعلن. قد يكون تالفًا أو مزوَّرًا.');
+  }
+
+  const compressed = await compressImage(original, file.type);
+  const body = compressed?.buffer ?? original;
+  const mimeType = compressed?.mimeType ?? file.type;
+
+  // اسم عشوائي: اسم الملف الأصلي قد يحمل اسم مريض أو رقم هوية، فلا يصير
+  // جزءًا من مسار قد يظهر في سجل أو رابط.
+  const extension = compressed
+    ? '.webp'
+    : path.extname(file.name).slice(0, 10).replace(/[^.\w]/g, '');
+  const id = randomUUID();
+  const key = `${prefix}/${id}${extension}`;
+
+  await putObject(key, body, mimeType);
+
+  let thumbPath: string | null = null;
+  const thumb = await makeThumbnail(original, file.type);
+  if (thumb) {
+    thumbPath = `${prefix}/${id}-thumb.webp`;
+    await putObject(thumbPath, thumb, 'image/webp');
   }
 
   return {
     filePath: key,
-    size: file.size,
-    mimeType: file.type,
+    size: body.length,
+    mimeType,
     originalName: file.name.slice(0, 255),
+    thumbPath,
   };
 }
 

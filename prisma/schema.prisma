@@ -404,6 +404,8 @@ model Attachment {
   id           String  @id @default(uuid()) @db.Uuid
   requestId    String  @map("request_id") @db.Uuid
   filePath     String  @map("file_path") @db.VarChar(500)
+  /// مصغّرة 64×64 للصور — null لغير الصور
+  thumbPath    String?  @map("thumb_path") @db.VarChar(500)
   originalName String  @map("original_name") @db.VarChar(255)
   mimeType     String  @map("mime_type") @db.VarChar(120)
   size         Int

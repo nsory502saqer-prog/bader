@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { Box, BoxHeader, BoxTitle, PageHeader } from '@/components/ui/surface';
 import { StatusLabel } from '@/components/ui/label';
@@ -129,6 +130,20 @@ export default async function DisbursementDetailPage({
                 <span className="tnum">{formatDateTime(order.deliveredAt)}</span>
               </Detail>
               <Detail label="اسم المستلم">{order.receivedByName ?? '—'}</Detail>
+              {order.signaturePath ? (
+                <Detail label="توقيع المستلم">
+                  {/* أبعاد صريحة تمنع إزاحة التخطيط، وخلفية بيضاء لأن
+                      التوقيع مرسوم بحبر داكن ولا يُقرأ على سطح داكن. */}
+                  <Image
+                    src={`/api/signatures/${order.id}`}
+                    alt={`توقيع ${order.receivedByName ?? 'المستلم'}`}
+                    width={280}
+                    height={140}
+                    unoptimized
+                    className="mt-0.5 h-auto w-full rounded border border-border bg-[var(--bgColor-white)]"
+                  />
+                </Detail>
+              ) : null}
             </dl>
           </Box>
 

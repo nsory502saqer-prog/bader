@@ -7,6 +7,7 @@ import { db, notDeleted } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { ForbiddenError } from '@/lib/rbac';
 import { requirePermissionInAction } from '@/lib/session';
+import { storeFile } from '@/lib/storage';
 import type { ActionResult } from '@/server/actions/beneficiary-actions';
 
 function fail(error: unknown): ActionResult<never> {
@@ -29,6 +30,22 @@ const deliverSchema = z.object({
     .optional()
     .nullable()
     .transform((v) => v || null),
+  /**
+   * التوقيع كـdata URL من لوحة التوقيع.
+   *
+   * الحد الأعلى 600KB: توقيع بالإصبع على قماش 140px لا يتجاوز عشرات
+   * الكيلوبايتات، وأي أكبر من ذلك ليس توقيعًا.
+   */
+  signature: z
+    .string()
+    .trim()
+    .max(600_000)
+    .optional()
+    .nullable()
+    .transform((v) => v || null)
+    .refine((v) => v === null || v.startsWith('data:image/png;base64,'), {
+      message: 'صيغة التوقيع غير صالحة.',
+    }),
 });
 
 /**
@@ -48,7 +65,7 @@ export async function deliverOrder(input: unknown): Promise<ActionResult> {
     if (!parsed.success) {
       return { ok: false, error: parsed.error.issues[0]?.message ?? 'بيانات غير صالحة.' };
     }
-    const { orderId, receivedByName, note } = parsed.data;
+    const { orderId, receivedByName, note, signature } = parsed.data;
 
     const order = await db.disbursementOrder.findFirst({
       where: { id: orderId, ...notDeleted },
@@ -57,6 +74,19 @@ export async function deliverOrder(input: unknown): Promise<ActionResult> {
     if (!order) return { ok: false, error: 'أمر الصرف غير موجود.' };
     if (order.status !== DisbursementStatus.issued) {
       return { ok: false, error: 'أمر الصرف مسلَّم أو ملغي أصلًا.' };
+    }
+
+    // التوقيع يُخزَّن كملف مثل أي مرفق، لا كنص ضخم داخل صف قاعدة البيانات.
+    // يُكتب قبل المعاملة: ملف يتيم عند فشلها أهون من معاملة تنتظر قرصًا.
+    let signaturePath: string | null = null;
+    if (signature) {
+      const base64 = signature.slice('data:image/png;base64,'.length);
+      const bytes = Buffer.from(base64, 'base64');
+      const stored = await storeFile(
+        new File([new Uint8Array(bytes)], 'signature.png', { type: 'image/png' }),
+        `signatures/${order.orderNo}`,
+      );
+      signaturePath = stored.filePath;
     }
 
     const now = new Date();
@@ -68,6 +98,7 @@ export async function deliverOrder(input: unknown): Promise<ActionResult> {
           status: DisbursementStatus.delivered,
           deliveredAt: now,
           receivedByName,
+          signaturePath,
         },
       });
 
@@ -101,7 +132,7 @@ export async function deliverOrder(input: unknown): Promise<ActionResult> {
       modelType: 'DisbursementOrder',
       modelId: orderId,
       oldValues: { status: DisbursementStatus.issued },
-      newValues: { status: DisbursementStatus.delivered, receivedByName },
+      newValues: { status: DisbursementStatus.delivered, receivedByName, signed: Boolean(signaturePath) },
     });
 
     revalidatePath('/disbursements');

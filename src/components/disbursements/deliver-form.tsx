@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { FormField, Input, Textarea } from '@/components/ui/field';
 import { Flash } from '@/components/ui/surface';
+import { SignaturePad } from '@/components/disbursements/signature-pad';
 import { deliverOrder } from '@/server/actions/disbursement-actions';
 
 /**
@@ -18,11 +19,12 @@ export function DeliverForm({ orderId }: { orderId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [receivedByName, setReceivedByName] = useState('');
   const [note, setNote] = useState('');
+  const [signature, setSignature] = useState<string | null>(null);
 
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = await deliverOrder({ orderId, receivedByName, note });
+      const result = await deliverOrder({ orderId, receivedByName, note, signature });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -47,6 +49,11 @@ export function DeliverForm({ orderId }: { orderId: string }) {
       <FormField label="ملاحظة التسليم" htmlFor="deliver-note">
         <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} />
       </FormField>
+
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-semibold text-fg">توقيع المستلم</span>
+        <SignaturePad onChange={setSignature} disabled={pending} />
+      </div>
 
       <div>
         <Button

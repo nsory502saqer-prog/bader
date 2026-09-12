@@ -40,6 +40,7 @@ export async function getDisbursementOrder(id: string) {
       issuedAt: true,
       deliveredAt: true,
       receivedByName: true,
+      signaturePath: true,
       issuedBy: { select: { name: true } },
       request: {
         select: {
